@@ -405,7 +405,16 @@ async function showAdminPanel(filter='pending'){
   </div>
  </article>`;
  }).join('');
- const bannedList=bannedUsers.length?`<details style="margin-top:22px"><summary><strong>Banned members (${bannedUsers.length})</strong></summary>${bannedUsers.map(u=>`<div class="admin-record"><span>${esc(u.email)}</span> <button class="btn btn-ghost" data-ban-user="${u.user_id}" data-ban-state="false">Unban email</button></div>`).join('')}</details>`:'';
+ const bannedList=`<section style="margin-top:22px" aria-label="Banned members report">
+   <h3 style="margin:0 0 7px">Banned members (${bannedUsers.length})</h3>
+   <p class="muted" style="font-size:12px">This private report includes email addresses, dates, ban reasons, and administrators. Only admins can download it.</p>
+   <div class="admin-actions" style="margin:12px 0">
+     <button type="button" class="btn btn-soft" data-export-bans="active">↓ Export active bans (CSV)</button>
+     <button type="button" class="btn btn-ghost" data-export-bans="all">↓ Export full ban history (CSV)</button>
+   </div>
+   <details><summary>Show banned accounts</summary>
+   ${bannedUsers.length?bannedUsers.map(u=>`<div class="admin-record"><span>${esc(u.email)}</span> <button class="btn btn-ghost" data-ban-user="${u.user_id}" data-ban-state="false">Unban email</button></div>`).join(''):'<p class="muted">No banned accounts yet.</p>'}
+   </details></section>`;
  openModal(`<h2>🛡️ Admin moderation</h2><p class="sub">New posts remain hidden until approved. Removing a listing or banning a member requires a reason. Email explanations are prepared but are not automatically sent yet.</p><div class="admin-alert-control"><strong>🔔 New listing alerts</strong><p>Review this inbox any time. When the site is open, it checks for new listings every 30 seconds.</p><button type="button" class="btn btn-soft" data-enable-admin-notifications>Enable browser notifications</button></div>
  <div style="display:flex;gap:6px;flex-wrap:wrap;margin:14px 0">${nav}</div>
  <p class="muted">${entries.length} listing(s) in this view</p>
@@ -414,6 +423,38 @@ async function showAdminPanel(filter='pending'){
  `,true);
 }
 
+function encodeCsvValue(input){
+ let value=String(input??'');
+ // Neutralise spreadsheet formulas before the CSV is opened in Excel or similar tools.
+ if(/^\s*[=+\-@]/.test(value) || /^[\t\r\n]/.test(value))value="'"+value;
+ return '"'+value.replace(/"/g,'""')+'"';
+}
+async function exportBanReport(scope='active'){
+ if(!adminAccess||!currentUser())return toast('Administrator access required.');
+ if(!['active','all'].includes(scope))throw new Error('Invalid report filter.');
+ const pageSize=500;
+ let items=[];
+ for(let offset=0;offset<100000;offset+=pageSize){
+  const {data,error}=await db.rpc('zds_admin_export_ban_report',{p_status:scope,p_offset:offset,p_limit:pageSize});
+  if(error)throw error;
+  items.push(...(data||[]));
+  if((data||[]).length<pageSize)break;
+ }
+ const header=['Email','User ID','Ban reason','Banned by','Date banned (UTC)','Status','Date unbanned (UTC)'];
+ const lines=[header,...items.map(x=>[x.email,x.user_id,x.reason,x.banned_by,x.banned_at,x.ban_status,x.lifted_at])];
+ const csv='\uFEFF'+lines.map(row=>row.map(encodeCsvValue).join(',')).join('\r\n')+'\r\n';
+ const file=new Blob([csv],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(file);
+ try{
+  const link=document.createElement('a');
+  link.href=url;
+  link.download='zero-dollar-store-banned-users-'+scope+'-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+ }finally{setTimeout(()=>URL.revokeObjectURL(url),3000)}
+ toast('Ban report prepared: '+items.length+' record(s).');
+}
 async function adminModerate(id,action){
  if(!adminAccess)return toast('Admin access required');
  let reason='';
@@ -469,6 +510,7 @@ q('modalOverlay').addEventListener('click',e=>{if(e.target===q('modalOverlay')||
   const d=currentEmailDraft;if(d&&navigator.clipboard)
    return navigator.clipboard.writeText('To: '+d.to+'\nSubject: '+d.subject+'\n\n'+d.body).then(()=>toast('Email copied; you still need to send it.')).catch(onError);
  }
+ const exportBans=e.target.closest('[data-export-bans]');if(exportBans)return exportBanReport(exportBans.dataset.exportBans).catch(onError);
  if(e.target.closest('[data-admin-return]'))return showAdminPanel('pending').catch(onError);
  if(e.target.closest('[data-enable-admin-notifications]')){
   if(!('Notification' in window))return toast('Notifications are unsupported in this browser.');
