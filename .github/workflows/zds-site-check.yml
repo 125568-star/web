@@ -1,0 +1,42 @@
+name: Zero Dollar Store site validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'zero-dollar-store/index.html'
+      - '.github/workflows/zds-site-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: Validate marketplace JavaScript and interface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract inline module and check interface
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          source = Path('zero-dollar-store/index.html').read_text(encoding='utf-8')
+          match = re.search(r'<script type="module">([\s\S]*?)</script>', source)
+          assert match, 'Marketplace script module missing'
+          Path('zero-dollar-store-inline.mjs').write_text(match.group(1), encoding='utf-8')
+          required = [
+              'id="adminBell"', 'id="adminWorkspace"',
+              'id="wantedPost"', 'id="wantedBrowse"',
+              'data-listing-view="have"', 'data-listing-view="want"',
+              'async function showEditListing(id)',
+              'async function saveEditedListing(form)',
+              'data-admin-delete=', 'zds_my_moderation_status',
+              'zds_admin_review_listing', 'listing_type'
+          ]
+          for item in required:
+              assert item in source, f'Required marketplace feature missing: {item}'
+          print('HTML entry points and admin/wanted/edit features are present')
+          PY
+      - name: Parse JavaScript
+        run: node --check zero-dollar-store-inline.mjs
