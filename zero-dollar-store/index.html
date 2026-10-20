@@ -167,9 +167,67 @@ function drawListings(){let arr=listings.filter(l=> (selectedCategory==='all'||S
   let cards=arr.map(l=>{const image=imagesByListing[l.id]?.[0];const img=image?`<img loading="lazy" src="${esc(photoUrl(image))}" alt="${esc(l.title)}">`:`<div class="emoji-placeholder">${categoryEmoji(l.category_id)}</div>`;return `<article class="item-card" role="button" tabindex="0" data-item="${l.id}"><div class="item-image">${img}<span class="free-chip">$0 · FREE</span><button type="button" class="save ${favorites.has(l.id)?'saved':''}" data-save="${l.id}" aria-label="Save listing">${favorites.has(l.id)?'♥':'♡'}</button></div><div class="item-body"><h3>${esc(l.title)}</h3><div class="listing-price">$0 <small>FREE</small></div><div class="condition">${esc(l.item_condition.replace('_',' '))} · Collection only</div><div class="item-footer"><strong>📍 ${esc(l.suburb)}, ${esc(l.state)}</strong><span>${humanAge(l.created_at)}</span></div></div></article>`});if(cards.length>=4)cards.splice(4,0,`<article class="ad-card"><div class="ad-label">ADVERTISEMENT SPACE</div><div class="ad-icon">📣</div><h3>Your business could advertise here</h3><p>Advertising supports a marketplace where every item is free.</p></article>`);q('itemsGrid').innerHTML=cards.join('');}
 async function loadFavorites(){favorites=new Set();if(!currentUser())return;const {data}=await db.from('favorites').select('listing_id');(data||[]).forEach(x=>favorites.add(x.listing_id));}
 async function refresh(){try{await Promise.all([fetchCategories(),fetchListings()]);await loadFavorites();drawListings()}catch(e){q('itemsGrid').innerHTML=`<div class="empty"><h3>Cannot load listings right now</h3><p>${esc(e.message)}</p></div>`;toast('Supabase connection problem. Check network and project configuration.')}}
-function showAuth(){openModal(`<h2>Welcome to Zero Dollar Store</h2><p class="sub">Join to list free items, message owners and arrange local collection. No payments, ever.</p><button class="auth-btn" data-oauth="google"><span class="auth-mark" style="color:#4285f4;font-weight:900">G</span> Continue with Google</button><button class="auth-btn" data-oauth="facebook"><span class="auth-mark" style="color:#1877f2;font-weight:900">f</span> Continue with Facebook</button><button class="auth-btn" data-oauth="azure"><span class="auth-mark">▦</span> Continue with Microsoft / Outlook</button><div class="or">or use your email</div><form id="authForm"><div class="field"><label for="authEmail">Email address</label><input type="email" id="authEmail" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="authPassword">Password</label><input type="password" id="authPassword" autocomplete="current-password" minlength="8" required placeholder="At least 8 characters"></div><div class="newsletter-choice"><label><input id="authNewsletter" type="checkbox"> Subscribe me to free finds and sponsored newsletters (optional).</label><small>Unsubscribe at any time. You can join without subscribing.</small></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit" class="btn" data-mode="signup">Create free account</button><button type="submit" class="btn btn-ghost" data-mode="login">Log in</button></div></form><p class="modal-note">Social sign-in requires its provider to be enabled in Supabase. If it isn't configured yet, use email sign-in.</p>`,true)}
-async function authenticate(mode){const email=q('authEmail').value.trim(),password=q('authPassword').value, opt=q('authNewsletter').checked;if(!email||!password)return;try{let outcome;if(mode==='signup'){outcome=await db.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname,data:{newsletter_opt_in:opt}}});}else outcome=await db.auth.signInWithPassword({email,password});if(outcome.error)throw outcome.error;toast(mode==='signup'&&!outcome.data.session?'Account created. Check your email to confirm your address.':'Signed in successfully.');if(mode==='signup'&&outcome.data.session&&opt)await setNewsletter(true);closeModal()}catch(e){toast(e.message)}}
-async function doOAuth(provider){try{const {error}=await db.auth.signInWithOAuth({provider,options:{redirectTo:location.origin+location.pathname,scopes:provider==='azure'?'email':''}});if(error)throw error}catch(e){toast(`${provider} login is not available yet: ${e.message}`)}}
+
+const oauthNames={google:'Google',facebook:'Facebook',azure:'Microsoft / Outlook'};
+const oauthReady={google:false,facebook:false,azure:false};
+async function loadOAuthAvailability(){
+  const box=q('modalBody'); if(!box || !box.querySelector('[data-oauth]'))return;
+  try {
+    const response=await fetch(SUPABASE_URL+'/auth/v1/settings',{headers:{'apikey':SUPABASE_PUBLIC_KEY}});
+    if(!response.ok)return;
+    const settings=await response.json();
+    for(const [provider,name] of Object.entries(oauthNames)){
+      const button=box.querySelector(`[data-oauth="${provider}"]`);
+      if(!button)return;
+      oauthReady[provider]=settings.external?.[provider]===true;
+      button.disabled=!oauthReady[provider];
+      button.title=oauthReady[provider]?`Continue with ${name}`:`${name} sign-in has not been enabled`;
+      const status=button.querySelector('.oauth-status');
+      if(status)status.textContent=oauthReady[provider]?'Available':'Not yet available';
+    }
+  }catch(_error){ /* Safe default: disabled until provider configuration is verified. */ }
+}
+function authFeedback(message,isError=false){
+ const node=q('authFeedback');if(!node){toast(message);return;}
+ node.hidden=false;node.style.border='1px solid '+(isError?'#e5a09a':'#a5d3b8');
+ node.style.background=isError?'#fff1ef':'#eef9f0';node.style.color=isError?'#8a2e29':'#236145';
+ node.style.borderRadius='10px';node.style.padding='12px';node.style.fontSize='13px';node.style.lineHeight='1.5';
+ node.textContent=message;node.scrollIntoView({block:'nearest',behavior:'smooth'});
+}
+function showAuth(){openModal(`<h2>Welcome to Zero Dollar Store</h2><p class="sub">Join to list free items, message owners and arrange local collection. No payments, ever.</p><button class="auth-btn" type="button" data-oauth="google" disabled><span class="auth-mark" style="color:#4285f4;font-weight:900">G</span> Continue with Google <small class="oauth-status" style="font-size:10px;margin-left:auto;color:#677a70">Not yet available</small></button><button class="auth-btn" type="button" data-oauth="facebook" disabled><span class="auth-mark" style="color:#1877f2;font-weight:900">f</span> Continue with Facebook <small class="oauth-status" style="font-size:10px;margin-left:auto;color:#677a70">Not yet available</small></button><button class="auth-btn" type="button" data-oauth="azure" disabled><span class="auth-mark">▦</span> Continue with Microsoft / Outlook <small class="oauth-status" style="font-size:10px;margin-left:auto;color:#677a70">Not yet available</small></button><div class="or">or use your email</div><form id="authForm"><p id="authFeedback" role="status" aria-live="polite" hidden></p><div class="field"><label for="authEmail">Email address</label><input type="email" id="authEmail" autocomplete="email" required placeholder="you@example.com"></div><div class="field"><label for="authPassword">Password</label><input type="password" id="authPassword" autocomplete="current-password" minlength="8" required placeholder="At least 8 characters"></div><div class="newsletter-choice"><label><input id="authNewsletter" type="checkbox"> Subscribe me to free finds and sponsored newsletters (optional).</label><small>Unsubscribe at any time. You can join without subscribing.</small></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="submit" class="btn" data-mode="signup">Create free account</button><button type="submit" class="btn btn-ghost" data-mode="login">Log in</button></div></form><p class="modal-note">Email accounts require confirmation. After registering, open the confirmation message in your inbox (including spam), click its link, then return to log in. Social sign-in becomes available once each provider is configured.</p>`,true);loadOAuthAvailability().catch(()=>{})}
+async function authenticate(mode){
+ const form=q('authForm'),email=q('authEmail').value.trim(),password=q('authPassword').value,opt=q('authNewsletter').checked;
+ if(!email||!password)return;
+ const buttons=[...form.querySelectorAll('button[type="submit"]')];
+ buttons.forEach(button=>button.disabled=true);
+ authFeedback(mode==='signup'?'Creating your free account…':'Signing in…');
+ try{
+  const options={emailRedirectTo:location.origin+location.pathname,data:{newsletter_opt_in:opt}};
+  const result=mode==='signup' ? await db.auth.signUp({email,password,options}) : await db.auth.signInWithPassword({email,password});
+  if(result.error)throw result.error;
+  if(mode==='signup'&&!result.data?.session){
+   authFeedback('Registration received. Check your email for a confirmation link, including the spam folder. Confirm your address before attempting to log in. If you previously registered with this address, use Log in instead.');
+   q('authPassword').value='';
+   return;
+  }
+  if(mode==='signup' && opt){try{await setNewsletter(true)}catch(_error){ /* Consent was recorded at registration. */ }}
+  closeModal();toast(mode==='signup'?'Your account is ready. You are signed in!':'Signed in successfully.');
+ }catch(error){
+  const message=String(error?.message||'Unknown authentication error');
+  if(/already registered|duplicate key|unique constraint|user already exists/i.test(message))authFeedback('This email is already registered. Use Log in, or confirm the verification email you received earlier.',true);
+  else if(/email not confirmed/i.test(message))authFeedback('Your account exists, but your email is not confirmed. Open the confirmation message sent to your inbox and click the link before logging in.',true);
+  else if(/invalid login credentials/i.test(message))authFeedback('Email or password is incorrect. If you just registered, confirm your email first.',true);
+  else if(/rate limit|too many requests/i.test(message))authFeedback('Too many attempts. Please try again later. Check for a verification email you may already have received.',true);
+  else authFeedback('Registration or login could not finish: '+message,true);
+ }finally{buttons.forEach(button=>button.disabled=false)}
+}
+async function doOAuth(provider){
+ if(!oauthReady[provider])return authFeedback((oauthNames[provider]||'This provider')+' login is not configured yet. Use email registration for now.',true);
+ try{
+  const {error}=await db.auth.signInWithOAuth({provider,options:{redirectTo:location.origin+location.pathname,...(provider==='azure'?{scopes:'email'}:{})}});
+  if(error)throw error;
+ }catch(error){authFeedback('Could not sign in with '+(oauthNames[provider]||provider)+': '+error.message,true)}
+}
 async function setNewsletter(opt){if(!currentUser())return toast('Sign in first to change newsletter settings.');const userId=currentUser().id;const now=new Date().toISOString();const payload={user_id:userId,opted_in:opt,consent_at:opt?now:null,unsubscribed_at:opt?null:now};const {error}=await db.from('newsletter_preferences').upsert(payload,{onConflict:'user_id'});if(error)throw error;toast(opt?'Newsletter subscription saved.':'You have unsubscribed.');}
 async function showAccount(){const u=currentUser();if(!u)return showAuth();const {data:newsletter}=await db.from('newsletter_preferences').select('opted_in').eq('user_id',u.id).maybeSingle();openModal(`<h2>My account</h2><p class="sub">Signed in as <strong>${esc(u.email||'member')}</strong></p><button class="btn full" data-action="myListings">Manage my listings</button><button class="btn btn-ghost full" data-action="inbox" style="margin-top:10px">My messages</button><button class="btn btn-ghost full" data-action="favorites" style="margin-top:10px">Saved items</button><div class="newsletter-choice"><label><input id="accountNewsletter" type="checkbox" ${newsletter?.opted_in?'checked':''}> Receive newsletter emails with free finds and clearly labelled sponsored messages</label><button class="btn btn-soft" data-action="saveNewsletter" type="button">Save newsletter preference</button></div><button class="btn btn-ghost full" data-action="logout">Log out</button>`,true)}
 function showPost(){if(!currentUser())return showAuth();openModal(`<h2>List something for $0</h2><p class="sub">Every listing is free and for local pickup only. Asking for payment, postage or deposits is prohibited.</p><form id="postForm"><div class="field"><label>Item title</label><input name="title" maxlength="150" minlength="3" placeholder="e.g. Working coffee machine" required></div><div class="field"><label>Category</label><select name="category" required>${categories.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Condition</label><select name="condition"><option value="good">Good</option><option value="new">New</option><option value="fair">Fair</option><option value="for_parts">For parts</option></select></div><div class="field"><label>Pickup suburb</label><input name="suburb" maxlength="100" required placeholder="e.g. Kuraby"></div><div class="field"><label>Australian state or territory</label><select name="state"><option>QLD</option><option>NSW</option><option>VIC</option><option>WA</option><option>SA</option><option>ACT</option><option>TAS</option><option>NT</option></select></div><div class="field"><label>Postcode (optional)</label><input name="postcode" pattern="[0-9]{4}" maxlength="4" inputmode="numeric" placeholder="e.g. 4112"></div><div class="field"><label>Description</label><textarea name="description" maxlength="5000" rows="4" placeholder="Tell people the condition and when they can collect it." required></textarea></div><div class="field"><label>Photos (up to 5, JPG/PNG/WebP, 8 MB each)</label><input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple></div><button class="btn full" type="submit">Publish free listing →</button></form>`,true)}
@@ -200,7 +258,15 @@ q('modalOverlay').addEventListener('click',e=>{if(e.target===q('modalOverlay')||
 q('modalOverlay').addEventListener('submit',e=>{e.preventDefault();const f=e.target;const submit=e.submitter;if(f.id==='authForm')return authenticate(submit?.dataset.mode||'login').catch(onError);if(f.id==='postForm'){const btn=f.querySelector('button[type=submit]');btn.disabled=true;return saveListing(f).catch(onError).finally(()=>btn.disabled=false)}if(f.id==='sendMessage')return sendMessage(f).catch(onError);if(f.id==='reportForm')return postReport(f).catch(onError)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
 db.auth.onAuthStateChange((_event,s)=>{session=s;setTimeout(()=>updateHeader().catch(onError),0)});
-(async()=>{const {data}=await db.auth.getSession();session=data?.session||null;await refresh();await updateHeader()})().catch(onError);
+(async()=>{
+ const params=new URLSearchParams(location.search);
+ const oauthError=params.get('error_description')||params.get('error');
+ const {data,error}=await db.auth.getSession();
+ if(error)toast('Sign-in session could not be restored: '+error.message);
+ session=data?.session||null;
+ await refresh();await updateHeader();
+ if(oauthError)toast('Sign-in failed: '+oauthError.replace(/\+/g,' '));
+})().catch(onError);
 
 </script>
 </body>
