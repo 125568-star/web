@@ -323,13 +323,113 @@ async function setNewsletter(opt){if(!currentUser())return toast('Sign in first 
 async function showAccount(){const u=currentUser();if(!u)return showAuth();const {data:newsletter}=await db.from('newsletter_preferences').select('opted_in').eq('user_id',u.id).maybeSingle();openModal(`<h2>My account</h2><p class="sub">Signed in as <strong>${esc(u.email||'member')}</strong></p><button class="btn full" data-action="myListings">Manage my listings</button>${adminAccess?'<button class="btn full" data-action="adminPanel" style="margin-top:10px">🛡️ Admin moderation — review & approve listings</button>':''}${accountBanned?'<p class="modal-note">This account is banned from participating in the marketplace.</p>':''}<button class="btn btn-ghost full" data-action="inbox" style="margin-top:10px">My messages</button><button class="btn btn-ghost full" data-action="favorites" style="margin-top:10px">Saved items</button><div class="newsletter-choice"><label><input id="accountNewsletter" type="checkbox" ${newsletter?.opted_in?'checked':''}> Receive newsletter emails with free finds and clearly labelled sponsored messages</label><button class="btn btn-soft" data-action="saveNewsletter" type="button">Save newsletter preference</button></div><button class="btn btn-ghost full" data-action="logout">Log out</button>`,true)}
 function showPost(type='have'){if(typeof type!=='string'||!['have','want'].includes(type))type='have';if(!currentUser())return showAuth();if(accountBanned)return toast('This account is banned from posting.');openModal(`<h2>Post: I have this / I want this</h2><p class="sub">Give away an item, or request something you need. Every post must be approved before it is visible. No payments or delivery fees.</p><div class="points-form-note"><strong>★ Earn Zero Dollar Points</strong> Giveaways earn 5 points plus 2 per photo (up to five) after approval. Wanted requests do not earn points. Future rewards will be announced.</div><form id="postForm"><div class="field"><label>Choose the type of post</label><select name="listing_type" required><option value="have" ${type==="have"?"selected":""}>🎁 I have this — give it away free</option><option value="want" ${type==="want"?"selected":""}>🔎 I want this — looking for it</option></select></div><div class="field"><label>Item title</label><input name="title" maxlength="150" minlength="3" placeholder="e.g. Working coffee machine" required></div><div class="field"><label>Category</label><select name="category" required>${categories.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div><div class="field"><label>Condition</label><select name="condition"><option value="good">Good</option><option value="new">New</option><option value="fair">Fair</option><option value="for_parts">For parts</option></select></div><div class="field"><label>Pickup suburb</label><input name="suburb" maxlength="100" required placeholder="e.g. Kuraby"></div><div class="field"><label>Australian state or territory</label><select name="state"><option>QLD</option><option>NSW</option><option>VIC</option><option>WA</option><option>SA</option><option>ACT</option><option>TAS</option><option>NT</option></select></div><div class="field"><label>Postcode (optional)</label><input name="postcode" pattern="[0-9]{4}" maxlength="4" inputmode="numeric" placeholder="e.g. 4112"></div><div class="field"><label>Description</label><textarea name="description" maxlength="5000" rows="4" placeholder="Describe the item you have or need. You can arrange free pickup, free delivery, or a voluntary exchange." required></textarea></div><div class="field"><label>Photos (up to 5, JPG/PNG/WebP, 8 MB each)</label><input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple></div><button class="btn full" type="submit">Submit listing for admin approval →</button></form>`,true)}
 async function saveListing(form){const u=currentUser();if(!u)return showAuth();const f=new FormData(form);const listing_type=f.get('listing_type');if(!['have','want'].includes(listing_type))throw new Error('Choose I have this or I want this.');const title=safe(f.get('title')),description=safe(f.get('description'));if(moneyRe.test(title+' '+description))throw new Error('No payment requests or prices are allowed in free listings.');const files=[...(form.elements.photos.files||[])];if(files.length>5)throw new Error('Choose no more than 5 photos.');for(const file of files)if(file.size>8*1024*1024||!['image/jpeg','image/png','image/webp'].includes(file.type))throw new Error('Photos must be JPG, PNG or WebP and smaller than 8 MB each.');const {data,error}=await db.from('listings').insert({owner_id:u.id,listing_type,category_id:Number(f.get('category')),title,description,item_condition:f.get('condition'),suburb:safe(f.get('suburb')),state:f.get('state'),postcode:safe(f.get('postcode'))||null}).select('id').single();if(error)throw error;let failed=0;for(const [i,file] of files.entries()){const ext=({ 'image/jpeg':'jpg','image/png':'png','image/webp':'webp'})[file.type];const path=`${u.id}/${data.id}/${crypto.randomUUID()}.${ext}`;const upload=await db.storage.from(BUCKET).upload(path,file,{contentType:file.type,upsert:false});if(upload.error){failed++;continue;}const stored=await db.from('listing_images').insert({listing_id:data.id,storage_path:path,display_order:i});if(stored.error)failed++}toast(failed?`Submitted for review. ${failed} photo(s) couldn't be saved.`:listing_type==='want'?'Your wanted request is awaiting admin approval.':'Your free item is awaiting admin approval.');closeModal();await fetchListings()}
-function showItem(id){const l=listings.find(x=>x.id===id);if(!l)return;const mine=l.owner_id===currentUser()?.id;const im=(imagesByListing[id]||[]).map(x=>`<img src="${esc(photoUrl(x))}" alt="Photo of ${esc(l.title)}">`).join('');openModal(`<h2>${esc(l.title)}</h2><div class="listing-price">$0 <small>FREE · LOCAL PICKUP ONLY</small></div><p class="sub">📍 ${esc(l.suburb)}, ${esc(l.state)} · ${esc(categoryName(l.category_id))} · ${esc(l.item_condition.replace('_',' '))}</p><div class="photos-row">${im||`<div style="font-size:70px">${categoryEmoji(l.category_id)}</div>`}</div><p style="white-space:pre-wrap">${esc(l.description||'No further description provided.')}</p><p class="modal-note">Never pay deposits, delivery fees or postage. Use in-app messages to arrange collection safely.</p>${mine?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-status="reserved" data-id="${l.id}">Mark reserved</button><button class="btn" data-status="collected" data-id="${l.id}">Mark collected</button><button class="btn btn-ghost" data-status="removed" data-id="${l.id}">Remove</button></div>`:`<button class="btn full" data-contact="${l.id}">I want this — message the owner →</button><button class="btn btn-ghost full" data-report="${l.id}" style="margin-top:8px">Report listing</button>`}`,true)}
+function showItem(id){
+ const l=listings.find(x=>x.id===id);if(!l)return;
+ const mine=l.owner_id===currentUser()?.id,want=l.listing_type==='want';
+ const photos=(imagesByListing[id]||[]).map(x=>'<img src="'+esc(photoUrl(x))+'" alt="Photo of '+esc(l.title)+'">').join('');
+ const actions=mine
+   ?'<div class="admin-actions"><button class="btn btn-soft" data-edit-listing="'+l.id+'">✏️ Edit / send for approval</button><button class="btn" data-status="reserved" data-id="'+l.id+'">Mark '+(want?'arranging':'reserved')+'</button><button class="btn" data-status="collected" data-id="'+l.id+'">Mark '+(want?'fulfilled':'collected')+'</button><button class="btn btn-ghost" data-status="removed" data-id="'+l.id+'">Remove my post</button></div>'
+   :'<button class="btn full" data-contact="'+l.id+'">'+(want?'I can help — message requester →':'I want this — message owner →')+'</button><button class="btn btn-ghost full" data-report="'+l.id+'" style="margin-top:8px">Report listing</button>';
+ const adminDelete=adminAccess?'<div class="admin-actions"><button class="admin-card-delete" data-admin-delete="'+l.id+'">🗑 Delete listing (admin)</button></div>':'';
+ openModal('<h2>'+esc(l.title)+'</h2><p class="sub"><strong>'+(want?'🔎 I WANT THIS':'🎁 I HAVE THIS')+'</strong> · '+(want?'Free request / voluntary exchange':'Free giveaway, $0')+'</p>'+
+ '<p class="sub">📍 '+esc(l.suburb)+', '+esc(l.state)+' · '+esc(categoryName(l.category_id))+'</p>'+
+ '<div class="photos-row">'+(photos||'<div style="font-size:70px">'+categoryEmoji(l.category_id)+'</div>')+'</div>'+
+ '<p style="white-space:pre-wrap">'+esc(l.description||'No details provided')+'</p>'+
+ '<p class="modal-note">Arrangements may include pickup or free delivery; wanted requests can also offer a voluntary exchange. No payments, postage charges or deposits.</p>'+
+ actions+adminDelete,true);
+}
 async function setStatus(id,status){const {error}=await db.from('listings').update({status}).eq('id',id).eq('owner_id',currentUser().id);if(error)throw error;closeModal();toast('Listing status updated.');await fetchListings()}
 async function contactOwner(id){if(!currentUser())return showAuth();const {data:existing,error:lookupError}=await db.from('conversations').select('id').eq('listing_id',id).eq('requester_id',currentUser().id).maybeSingle();if(lookupError)throw lookupError;let convId=existing?.id;if(!convId){const {data,error}=await db.from('conversations').insert({listing_id:id,requester_id:currentUser().id}).select('id').single();if(error)throw error;convId=data.id;}await showThread(convId)}
 async function showThread(id){if(!currentUser())return showAuth();const {data:thread,error}=await db.from('conversations').select('id,listing_id,requester_id,listings(title,owner_id)').eq('id',id).single();if(error)throw error;const {data:messages,error:err}=await db.from('messages').select('id,sender_id,body,created_at').eq('conversation_id',id).order('created_at');if(err)throw err;openModal(`<h2>Messages about ${esc(thread.listings?.title||'an item')}</h2><p class="sub">Agree on a collection location and time. Never send money.</p><div id="threadMessages" style="max-height:360px;overflow-y:auto">${messages?.length?messages.map(m=>`<div class="msg ${m.sender_id===currentUser().id?'mine':''}">${esc(m.body)}<small>${m.sender_id===currentUser().id?'You':'Other member'} · ${new Date(m.created_at).toLocaleString('en-AU')}</small></div>`).join(''):'<p class="muted">Start the conversation.</p>'}</div><form id="sendMessage" data-thread="${id}"><div class="field"><label>Message</label><textarea name="body" maxlength="4000" required placeholder="Hi! Is this still available for collection?"></textarea></div><button type="submit" class="btn full">Send message →</button></form>`,true);q('threadMessages').scrollTop=q('threadMessages').scrollHeight}
 async function sendMessage(form){const id=form.dataset.thread,body=safe(new FormData(form).get('body'));if(!body) return;if(moneyRe.test(body))throw new Error('Please do not request payment through the marketplace.');const {error}=await db.from('messages').insert({conversation_id:id,sender_id:currentUser().id,body});if(error)throw error;await showThread(id)}
 async function showInbox(){if(!currentUser())return showAuth();const {data,error}=await db.from('conversations').select('id,requester_id,created_at,listings(title,owner_id)').order('created_at',{ascending:false});if(error)throw error;openModal(`<h2>My messages</h2>${data?.length?data.map(c=>`<button class="auth-btn" data-thread="${c.id}">💬 ${esc(c.listings?.title||'Item')} · ${humanAge(c.created_at)}</button>`).join(''):'<p class="sub">No conversations yet. Browse items and contact an owner.</p>'}`,true)}
-async function showMyListings(){if(!currentUser())return showAuth();const {data,error}=await db.from('listings').select('id,title,status,moderation_status,suburb,created_at').eq('owner_id',currentUser().id).order('created_at',{ascending:false});if(error)throw error;openModal(`<h2>My free listings</h2><button class="btn" data-action="newPost">＋ List another item</button>${data?.length?data.map(x=>`<div class="thread"><strong>${esc(x.title)}</strong> <small>(${esc(x.moderation_status==='pending'?'Pending approval':x.moderation_status==='rejected'?'Rejected':x.moderation_status==='hidden'?'Hidden':x.status)})</small><p class="muted">${esc(x.suburb)} · ${humanAge(x.created_at)}</p><button class="btn btn-soft" data-manage="${x.id}" data-next="${x.status==='available'?'reserved':'available'}">Mark ${x.status==='available'?'reserved':'available'}</button> <button class="btn btn-ghost" data-manage="${x.id}" data-next="collected">Collected</button> <button class="btn btn-ghost" data-manage="${x.id}" data-next="removed">Remove</button></div>`).join(''):'<p class="sub">You have no listings yet.</p>'}`,true)}
+async function showMyListings(){
+ if(!currentUser())return showAuth();
+ const {data,error}=await db.from('listings').select('id,listing_type,title,status,moderation_status,suburb,created_at')
+  .eq('owner_id',currentUser().id).order('created_at',{ascending:false});
+ if(error)throw error;
+ const rows=(data||[]).map(x=>{
+  const editable=x.status!=='removed'&&x.moderation_status!=='hidden';
+  const label=x.moderation_status==='pending'?'Awaiting admin approval':x.moderation_status==='rejected'?'Rejected':x.moderation_status==='hidden'?'Deleted / hidden':x.status;
+  const buttons=editable
+   ?'<button class="btn btn-soft" data-edit-listing="'+x.id+'">✏️ Edit / resubmit</button> <button class="btn btn-ghost" data-manage="'+x.id+'" data-next="'+(x.status==='available'?'reserved':'available')+'">Mark '+(x.status==='available'?'reserved':'available')+'</button> <button class="btn btn-ghost" data-manage="'+x.id+'" data-next="collected">'+(x.listing_type==='want'?'Fulfilled':'Collected')+'</button> <button class="btn btn-ghost" data-manage="'+x.id+'" data-next="removed">Remove</button>'
+   :'';
+  return '<div class="thread"><strong>'+esc(x.title)+'</strong> <small>· '+(x.listing_type==='want'?'🔎 Wanted request':'🎁 Giveaway')+' · '+esc(label)+'</small><p class="muted">'+esc(x.suburb)+' · '+humanAge(x.created_at)+'</p><div class="admin-actions">'+buttons+'</div></div>';
+ }).join('');
+ openModal('<h2>My items & wanted requests</h2><p class="sub">Editing a listing or changing photos sends it back for admin approval before it becomes public again.</p><button class="btn" data-action="newPost">＋ Create a post</button>'+ (rows||'<p class="sub">You have no posts yet.</p>'),true);
+}
+async function showEditListing(id){
+ if(!currentUser())return showAuth();
+ if(accountBanned)throw new Error('This account is banned from editing.');
+ const {data:l,error}=await db.from('listings')
+  .select('id,listing_type,title,description,category_id,item_condition,suburb,state,postcode,status,moderation_status')
+  .eq('id',id).eq('owner_id',currentUser().id).single();
+ if(error)throw error;
+ if(l.status==='removed'||l.moderation_status==='hidden')throw new Error('This post cannot be edited.');
+ const {data:photos,error:photoError}=await db.from('listing_images')
+  .select('storage_path,display_order').eq('listing_id',id).order('display_order');
+ if(photoError)throw photoError;
+ const categoryOptions=categories.map(c=>'<option value="'+c.id+'" '+(String(c.id)===String(l.category_id)?'selected':'')+'>'+esc(c.name)+'</option>').join('');
+ const conditions=[['good','Good / usable'],['new','New'],['fair','Fair'],['for_parts','For parts']]
+  .map(([value,label])=>'<option value="'+value+'" '+(l.item_condition===value?'selected':'')+'>'+label+'</option>').join('');
+ const states=['QLD','NSW','VIC','WA','SA','ACT','TAS','NT']
+  .map(state=>'<option '+(l.state===state?'selected':'')+'>'+state+'</option>').join('');
+ const previews=(photos||[]).map(photo=>'<img loading="lazy" src="'+esc(photoUrl(photo))+'" alt="Current photo">').join('');
+ openModal('<h2>Edit item / wanted request</h2><p class="not-available"><strong>Approval required.</strong> Saving edits hides your post until an administrator reviews the changes.</p>'+
+ '<form id="editListingForm" data-id="'+l.id+'">'+
+ '<div class="field"><label>Post type</label><select name="listing_type"><option value="have" '+(l.listing_type==='have'?'selected':'')+'>🎁 I have this — free item</option><option value="want" '+(l.listing_type==='want'?'selected':'')+'>🔎 I want this — request</option></select></div>'+
+ '<div class="field"><label>Title</label><input name="title" maxlength="150" minlength="3" value="'+esc(l.title)+'" required></div>'+
+ '<div class="field"><label>Category</label><select name="category">'+categoryOptions+'</select></div>'+
+ '<div class="field"><label>Condition</label><select name="condition">'+conditions+'</select></div>'+
+ '<div class="field"><label>Suburb</label><input name="suburb" maxlength="100" value="'+esc(l.suburb)+'" required></div>'+
+ '<div class="field"><label>State / territory</label><select name="state">'+states+'</select></div>'+
+ '<div class="field"><label>Postcode (optional)</label><input name="postcode" pattern="[0-9]{4}" maxlength="4" value="'+esc(l.postcode||'')+'"></div>'+
+ '<div class="field"><label>Description</label><textarea name="description" maxlength="5000" rows="5" required>'+esc(l.description||'')+'</textarea></div>'+
+ (previews?'<p class="muted">Existing photos:</p><div class="photos-row">'+previews+'</div>':'')+
+ '<div class="field"><label>Replace photos (optional)</label><input name="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple><small class="filehint">Choose up to 5 new photos to replace the old ones, or leave empty to keep them.</small></div>'+
+ '<button type="submit" class="btn full">Save and send for admin approval →</button></form>',true);
+}
+async function saveEditedListing(form){
+ const user=currentUser();if(!user)return showAuth();
+ if(accountBanned)throw new Error('This account cannot edit.');
+ const id=form.dataset.id,f=new FormData(form),listing_type=f.get('listing_type');
+ if(!['have','want'].includes(listing_type))throw new Error('Choose a valid post type.');
+ const title=safe(f.get('title')),description=safe(f.get('description'));
+ if(moneyRe.test(title+' '+description))throw new Error('No payments or fees are allowed.');
+ const files=[...(form.elements.photos.files||[])];
+ if(files.length>5)throw new Error('Choose at most 5 photos.');
+ for(const file of files)if(file.size>8*1024*1024||!['image/jpeg','image/png','image/webp'].includes(file.type))
+  throw new Error('Photos must be JPG, PNG or WebP under 8 MB.');
+ const {data,error}=await db.from('listings').update({
+   listing_type,category_id:Number(f.get('category')),title,description,
+   item_condition:f.get('condition'),suburb:safe(f.get('suburb')),state:f.get('state'),
+   postcode:safe(f.get('postcode'))||null,moderation_status:'pending'
+ }).eq('id',id).eq('owner_id',user.id).select('id,moderation_status').single();
+ if(error)throw error;
+ if(data.moderation_status!=='pending')throw new Error('Listing did not return to approval.');
+ let failed=0;
+ if(files.length){
+  const previous=await db.from('listing_images').select('id,storage_path').eq('listing_id',id);
+  if(previous.error)throw previous.error;
+  const removed=await db.from('listing_images').delete().eq('listing_id',id);
+  if(removed.error)throw removed.error;
+  if(previous.data?.length){
+   const cleaned=await db.storage.from(BUCKET).remove(previous.data.map(p=>p.storage_path));
+   if(cleaned.error)console.warn('Old photo storage cleanup',cleaned.error);
+  }
+  for(const [i,file] of files.entries()){
+   const ext=({'image/jpeg':'jpg','image/png':'png','image/webp':'webp'})[file.type];
+   const storagePath=user.id+'/'+id+'/'+crypto.randomUUID()+'.'+ext;
+   const uploaded=await db.storage.from(BUCKET).upload(storagePath,file,{contentType:file.type,upsert:false});
+   if(uploaded.error){failed++;continue;}
+   const inserted=await db.from('listing_images').insert({listing_id:id,storage_path:storagePath,display_order:i});
+   if(inserted.error)failed++;
+  }
+ }
+ closeModal();
+ toast(failed?'Changes sent for approval; '+failed+' photo(s) could not be saved.':'Changes are pending admin approval; they are not public.');
+ await fetchListings();if(adminAccess)await checkAdminAlerts().catch(console.warn);
+}
 async function showFavorites(){if(!currentUser())return showAuth();await loadFavorites();const arr=listings.filter(x=>favorites.has(x.id));openModal(`<h2>Saved free items</h2>${arr.length?arr.map(x=>`<button class="auth-btn" data-detail="${x.id}">♡ ${esc(x.title)} — ${esc(x.suburb)}</button>`).join(''):'<p class="sub">No saved items yet. Tap the ♡ on any listing.</p>'}`,true)}
 async function toggleFavorite(id){if(!currentUser())return showAuth();if(favorites.has(id)){const {error}=await db.from('favorites').delete().eq('user_id',currentUser().id).eq('listing_id',id);if(error)throw error;favorites.delete(id)}else{const {error}=await db.from('favorites').insert({user_id:currentUser().id,listing_id:id});if(error)throw error;favorites.add(id)}drawListings()}
 async function reportListing(id){if(!currentUser())return showAuth();openModal(`<h2>Report a listing</h2><p class="sub">Tell us what looks wrong. Reports are private.</p><form id="reportForm" data-id="${id}"><div class="field"><label>Reason</label><select name="reason"><option value="not_free">Asks for payment or a fee</option><option value="prohibited">Prohibited item</option><option value="scam">Suspected scam</option><option value="spam">Spam</option><option value="other">Other</option></select></div><div class="field"><label>Additional details</label><textarea name="details" maxlength="2000"></textarea></div><button class="btn full" type="submit">Send report</button></form>`)}
