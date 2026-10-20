@@ -237,6 +237,7 @@ const moneyRe = /(?:\$\s*\d|\b(?:payment|price\s*[:=]|deposit|paypal|bank transf
 const categoryIcons = {'furniture':'🛋️','electronics':'💻','home-appliances':'🏠','garden':'🌿','tools':'🧰','sports':'🚲','books':'📚','clothing':'👕','baby-kids':'🧸','pets':'🐶','building-materials':'🪚','other':'🎁'};
 const categoryColors=['#edf2e5','#e8eefe','#fff2e4','#e9f3e5','#fff0e5','#e5f5f7'];
 let adminAccess=false, accountBanned=false, adminSeenNotices=null, adminChecking=false, currentEmailDraft=null, listingView='have', identitySerial=0;
+let pendingApprovalEmailLink=(new URLSearchParams(location.search)).get('review')==='pending';
  let session=null, categories=[], listings=[], imagesByListing={}, favorites=new Set(), selectedCategory='all', searchTerm='', searchArea='', toastTimeout;
 function toast(msg){const el=q('toast');clearTimeout(toastTimeout);el.textContent=msg;el.classList.add('show');toastTimeout=setTimeout(()=>el.classList.remove('show'),4500)}
 function openModal(content,large=false){q('modalBody').className='modal'+(large?' large':'');q('modalBody').innerHTML=`<button class="modal-close" aria-label="Close" data-close>×</button>`+content;q('modalOverlay').classList.add('show');document.body.style.overflow='hidden'}
@@ -486,6 +487,24 @@ async function updateHeader(){
  ['postTop','heroPost','pointsPost','wantedPost'].forEach(id=>{const button=q(id);if(button){button.disabled=accountBanned;button.title=accountBanned?'Account banned from posting':'';}});
  drawListings();
  if(adminAccess)await checkAdminAlerts().catch(console.warn);
+ // Deep link from the single daily email: authenticate, then show the protected queue.
+ if(pendingApprovalEmailLink){
+   if(user&&adminAccess){
+     pendingApprovalEmailLink=false;
+     const cleanUrl=new URL(location.href);
+     cleanUrl.searchParams.delete('review');
+     history.replaceState(null,'',cleanUrl.pathname+cleanUrl.search+cleanUrl.hash);
+     await showAdminPanel('pending').catch(onError);
+   }else if(!user){
+     if(!q('modalOverlay').classList.contains('show')){
+       showAuth();
+       authFeedback('Sign in with your administrator account to review pending items.');
+     }
+   }else{
+     pendingApprovalEmailLink=false;
+     toast('This review link is only available to approved administrators.');
+   }
+ }
 }
 function showNavigation(){openModal(`<h2>Explore Zero Dollar Store</h2><p><a href="#browse" data-nav-view="have">🎁 I have this — free stuff</a></p><p><a href="#browse" data-nav-view="want">🔎 I want this — requests</a></p><p><a href="#safety" data-nav>Safety</a></p>${adminAccess?'<button class="btn full" data-action="adminPanel">🛡️ Administrator moderation</button>':''}<button class="btn full" data-action="account">My account / Log in</button>`)}
 
