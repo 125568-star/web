@@ -104,6 +104,9 @@
   .newsletter{background:#102a34;border-radius:16px;margin:38px 0 31px}
   .newsletter .btn{background:#baf046;color:#173a28}
   .footer{background:#fff}
+  .footer-operator{margin-top:22px;padding-top:16px;border-top:1px solid #eaf0ea;text-align:center;font-size:12px;color:#687971;line-height:1.6}
+  .footer-operator a{color:#176a53;font-weight:800;text-decoration:underline;text-underline-offset:2px}
+  .footer-operator a:hover,.footer-operator a:focus-visible{color:#0b513b}
   .demo-ribbon{background:#202b3a}
   @media(max-width:1150px){.items-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
   @media(max-width:840px){.hero{grid-template-columns:1fr 220px;min-height:290px}.zero-sign{width:190px;height:188px}.zero-price{font-size:95px}.hero-small{display:none}.categories{grid-template-columns:repeat(4,minmax(0,1fr))}.items-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -200,7 +203,7 @@
     <div class="container"><section class="newsletter"><div><p class="kicker" style="color:#c9ed83;margin-bottom:12px">FREE FINDS BY EMAIL</p><h2>The best $0 finds, in your inbox.</h2><p>Get newly listed free items, local highlights and clearly marked advertising in one handy email. Subscription is optional and you can unsubscribe at any time.</p></div><form id="newsletterForm"><div class="newsletter-fields"><input type="email" id="newsletterEmail" placeholder="Enter your email address" aria-label="Newsletter email" required><button class="btn" type="submit">Keep me posted →</button></div><label><input id="newsletterConsent" type="checkbox" required>Yes, I agree to receive the Zero Dollar Store newsletter including occasional sponsored messages. I can unsubscribe anytime.</label></form></section></div>
   </main>
   <section class="container admin-workspace" id="adminWorkspace" hidden aria-label="Administrator controls"><h2>🛡️ Administrator controls</h2><p id="adminWorkspaceIdentity"></p><button class="btn" id="adminWorkspaceButton" type="button">Review listings, requests, bans and reports →</button></section>
-  <footer class="footer"><div class="container footer-row"><div><a class="brand" href="#top"><span class="brand-emblem" aria-hidden="true">$0</span><span class="brand-name">ZERO <strong>DOLLAR</strong> STORE</span></a><p>Everything costs $0. The online marketplace where useful things get a second life.</p></div><div class="footer-nav"><a href="#browse">Browse $0 items</a><a href="#how">How it works</a><a href="#safety">Safety rules</a><a href="#newsletterForm">Newsletter</a><a href="#" id="footerSignIn">Member sign in</a></div></div></footer>
+  <footer class="footer"><div class="container footer-row"><div><a class="brand" href="#top"><span class="brand-emblem" aria-hidden="true">$0</span><span class="brand-name">ZERO <strong>DOLLAR</strong> STORE</span></a><p>Everything costs $0. The online marketplace where useful things get a second life.</p></div><div class="footer-nav"><a href="#browse">Browse $0 items</a><a href="#how">How it works</a><a href="#safety">Safety rules</a><a href="#newsletterForm">Newsletter</a><a href="#" id="footerSignIn">Member sign in</a></div></div><div class="container footer-operator">Operated by <a href="https://GroundSupportCrew.com" target="_blank" rel="noopener noreferrer">GroundSupportCrew.com</a>.</div></footer>
   
   <div class="overlay" id="modalOverlay" role="dialog" aria-modal="true" aria-label="Dialog"><div class="modal" id="modalBody"></div></div><div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script type="module">
