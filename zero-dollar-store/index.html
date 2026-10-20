@@ -335,20 +335,32 @@ async function toggleFavorite(id){if(!currentUser())return showAuth();if(favorit
 async function reportListing(id){if(!currentUser())return showAuth();openModal(`<h2>Report a listing</h2><p class="sub">Tell us what looks wrong. Reports are private.</p><form id="reportForm" data-id="${id}"><div class="field"><label>Reason</label><select name="reason"><option value="not_free">Asks for payment or a fee</option><option value="prohibited">Prohibited item</option><option value="scam">Suspected scam</option><option value="spam">Spam</option><option value="other">Other</option></select></div><div class="field"><label>Additional details</label><textarea name="details" maxlength="2000"></textarea></div><button class="btn full" type="submit">Send report</button></form>`)}
 async function postReport(form){const f=new FormData(form);const {error}=await db.from('reports').insert({listing_id:form.dataset.id,reporter_id:currentUser().id,reason:f.get('reason'),details:safe(f.get('details'))});if(error)throw error;closeModal();toast('Your report has been received. Thank you.')}
 async function updateHeader(){
- q('loginTop').textContent=currentUser()?'My account':'Log in';
- adminAccess=false;accountBanned=false;
- if(currentUser()){
+ const check=++identitySerial;
+ const user=currentUser();
+ let verifiedAdmin=false,verifiedBan=false;
+ if(user){
    const {data,error}=await db.rpc('zds_my_moderation_status');
-   if(error)console.warn('Could not load account permissions',error);
-   else {adminAccess=!!data?.admin;accountBanned=!!data?.banned;}
-   await loadFavorites();
- } else {favorites.clear();adminSeenNotices=null;}
- const bell=q('adminBell'); if(bell)bell.hidden=!adminAccess;
- if(adminAccess)await checkAdminAlerts().catch(console.warn);
- ['postTop','heroPost','pointsPost'].forEach(id=>{const b=q(id);if(b){b.disabled=accountBanned;b.title=accountBanned?'This account cannot create listings':''}});
+   if(error){console.warn('Administrator verification temporarily unavailable',error);}
+   else {verifiedAdmin=!!data?.admin;verifiedBan=!!data?.banned;}
+ }
+ if(check!==identitySerial || currentUser()?.id!==user?.id)return;
+ adminAccess=verifiedAdmin;accountBanned=verifiedBan;
+ const account=q('loginTop');
+ account.textContent=!user?'Log in':adminAccess?'🛡️ Admin account':'My account';
+ account.classList.toggle('admin-user',adminAccess);
+ account.title=user?(adminAccess?'Administrator: ':'Signed in: ')+(user.email||'member'):'Log in';
+ const bell=q('adminBell');if(bell)bell.hidden=!adminAccess;
+ const workspace=q('adminWorkspace');if(workspace)workspace.hidden=!adminAccess;
+ if(adminAccess){
+   q('adminWorkspaceIdentity').textContent='Administrator signed in: '+(user.email||'member')+'. Access stays active until you log out.';
+ }else adminSeenNotices=null;
+ if(user)await loadFavorites();else favorites.clear();
+ if(check!==identitySerial)return;
+ ['postTop','heroPost','pointsPost','wantedPost'].forEach(id=>{const button=q(id);if(button){button.disabled=accountBanned;button.title=accountBanned?'Account banned from posting':'';}});
  drawListings();
+ if(adminAccess)await checkAdminAlerts().catch(console.warn);
 }
-function showNavigation(){openModal(`<h2>Explore Zero Dollar Store</h2><p><a href="#browse" data-nav>Browse $0 items</a></p><p><a href="#categories" data-nav>Categories</a></p><p><a href="#how" data-nav>How it works</a></p><p><a href="#safety" data-nav>Safety</a></p><button class="btn full" data-action="account">My account / Log in</button>`)}
+function showNavigation(){openModal(`<h2>Explore Zero Dollar Store</h2><p><a href="#browse" data-nav-view="have">🎁 I have this — free stuff</a></p><p><a href="#browse" data-nav-view="want">🔎 I want this — requests</a></p><p><a href="#safety" data-nav>Safety</a></p>${adminAccess?'<button class="btn full" data-action="adminPanel">🛡️ Administrator moderation</button>':''}<button class="btn full" data-action="account">My account / Log in</button>`)}
 
 
 async function checkAdminAlerts(){
@@ -363,7 +375,7 @@ async function checkAdminAlerts(){
   const count=(pending.data||[]).length;
   q('adminPendingCount').textContent=String(count);
   q('adminBell').title=count+' listings awaiting review';
-  const recent=(alerts.data||[]).filter(e=>e.event_type==='posted');
+  const recent=(alerts.data||[]).filter(e=>e.event_type==='posted'||e.event_type==='edited');
   const news=adminSeenNotices===null?[]:recent.filter(e=>!adminSeenNotices.has(e.event_id));
   adminSeenNotices=new Set(recent.map(e=>e.event_id));
   if(news.length){
@@ -399,8 +411,9 @@ async function showAdminPanel(filter='pending'){
  ]);
  if(error)throw error;if(banError)throw banError;
  const entries=data||[], bannedUsers=banned||[];
- const ids=entries.map(x=>x.id),pics={};
+ const ids=entries.map(x=>x.id),pics={},types={};
  if(ids.length){
+  const {data:kinds,error:kindsError}=await db.from('listings').select('id,listing_type').in('id',ids);if(kindsError)throw kindsError;(kinds||[]).forEach(x=>types[x.id]=x.listing_type);
   const {data:photos,error:photoError}=await db.from('listing_images')
     .select('listing_id,storage_path,display_order').in('listing_id',ids).order('display_order');
   if(photoError)throw photoError;
@@ -412,7 +425,7 @@ async function showAdminPanel(filter='pending'){
   const photos=(pics[x.id]||[]).slice(0,5).map(p=>`<img loading="lazy" style="width:72px;height:64px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb" src="${esc(photoUrl(p))}" alt="Listing photo">`).join('');
   const banned=bannedUsers.some(u=>u.user_id===x.owner_id);
   return `<article class="admin-record">
-  <strong>${esc(x.title)}</strong> <span class="muted">· ${esc(x.moderation_status)} · ${esc(x.status)}</span>
+  <strong>${esc(x.title)}</strong> <span class="muted">· ${types[x.id]==="want"?"🔎 Wanted request":"🎁 Free item"} · ${esc(x.moderation_status)} · ${esc(x.status)}</span>
   <p class="muted">Posted by ${esc(x.owner_email||x.owner_id)} · ${humanAge(x.created_at)} · ${esc(x.suburb)}, ${esc(x.state)}</p>
   <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0">${photos}</div>
   <p style="white-space:pre-wrap;font-size:13px">${esc(x.description)}</p>
@@ -515,11 +528,22 @@ async function adminSetBan(id,banned,email='this member'){
 
 function onError(e){console.error(e);toast(e?.message||'Something went wrong. Please try again.');}
 q('categoryGrid').addEventListener('click',(e)=>{const el=e.target.closest('[data-cat]');if(!el)return;selectedCategory=el.dataset.cat;drawCategories();drawListings();q('browse').scrollIntoView({behavior:'smooth'})});
-q('itemsGrid').addEventListener('click',(e)=>{const f=e.target.closest('[data-save]');if(f){e.stopPropagation();toggleFavorite(f.dataset.save).catch(onError);return}if(e.target.closest('[data-post]'))return showPost();const el=e.target.closest('[data-item]');if(el)showItem(el.dataset.item)});
+q('itemsGrid').addEventListener('click',e=>{
+ const remove=e.target.closest('[data-admin-delete]');if(remove){e.stopPropagation();if(!adminAccess)return;return adminModerate(remove.dataset.adminDelete,'delete').catch(onError);}
+ const favorite=e.target.closest('[data-save]');if(favorite){e.stopPropagation();return toggleFavorite(favorite.dataset.save).catch(onError);}
+ const post=e.target.closest('[data-post]');if(post)return showPost(post.dataset.post||'have');
+ const item=e.target.closest('[data-item]');if(item)showItem(item.dataset.item);
+});
 q('itemsGrid').addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-item]')){e.preventDefault();showItem(e.target.dataset.item)}});
 q('searchForm').addEventListener('submit',e=>{e.preventDefault();searchTerm=safe(q('searchText').value);searchArea=safe(q('searchArea').value);drawListings();q('browse').scrollIntoView({behavior:'smooth'})});
 q('sortBy').addEventListener('change',drawListings);q('resetButton').addEventListener('click',()=>{selectedCategory='all';searchTerm='';searchArea='';q('searchText').value='';q('searchArea').value='';drawCategories();drawListings();q('browse').scrollIntoView({behavior:'smooth'})});
-q('adminBell').addEventListener('click',()=>showAdminPanel().catch(onError));q('postTop').addEventListener('click',showPost);q('heroPost').addEventListener('click',showPost);q('pointsPost').addEventListener('click',showPost);q('loginTop').addEventListener('click',()=>currentUser()?showAccount().catch(onError):showAuth());q('footerSignIn').addEventListener('click',e=>{e.preventDefault();currentUser()?showAccount().catch(onError):showAuth()});q('mobileMenu').addEventListener('click',showNavigation);
+q('adminBell').addEventListener('click',()=>showAdminPanel().catch(onError));
+q('adminWorkspaceButton').addEventListener('click',()=>showAdminPanel().catch(onError));
+q('wantedPost').addEventListener('click',()=>showPost('want'));
+q('wantedBrowse').addEventListener('click',()=>{listingView='want';selectedCategory='all';drawCategories();drawListings();q('browse').scrollIntoView({behavior:'smooth'});});
+document.querySelectorAll('[data-listing-view]').forEach(button=>button.addEventListener('click',()=>{
+ listingView=button.dataset.listingView;selectedCategory='all';drawCategories();drawListings();
+}));q('postTop').addEventListener('click',showPost);q('heroPost').addEventListener('click',showPost);q('pointsPost').addEventListener('click',showPost);q('loginTop').addEventListener('click',()=>currentUser()?showAccount().catch(onError):showAuth());q('footerSignIn').addEventListener('click',e=>{e.preventDefault();currentUser()?showAccount().catch(onError):showAuth()});q('mobileMenu').addEventListener('click',showNavigation);
 q('advertiseButton').addEventListener('click',()=>openModal(`<h2>Advertise with Zero Dollar Store 📣</h2><p class="sub">Our advertising spaces fund a marketplace where every item costs $0.</p><p>Options include banner advertising, sponsored placements and ads in consent-based newsletters. Advertising enquiries will be enabled before launch.</p>`));
 q('newsletterForm').addEventListener('submit',e=>{e.preventDefault();if(!q('newsletterConsent').checked)return toast('Please tick the consent box to subscribe.');if(!currentUser())return showAuth();if(safe(q('newsletterEmail').value).toLowerCase()!==safe(currentUser().email).toLowerCase())return toast('Use the email address associated with your account.');setNewsletter(true).then(()=>{q('newsletterEmail').value='';q('newsletterConsent').checked=false}).catch(onError)});
 q('modalOverlay').addEventListener('click',e=>{if(e.target===q('modalOverlay')||e.target.closest('[data-close]'))return closeModal();
@@ -537,8 +561,11 @@ q('modalOverlay').addEventListener('click',e=>{if(e.target===q('modalOverlay')||
  }
  const filter=e.target.closest('[data-admin-filter]');if(filter)return showAdminPanel(filter.dataset.adminFilter).catch(onError);
  const mod=e.target.closest('[data-moderate]');if(mod)return adminModerate(mod.dataset.target,mod.dataset.moderate).catch(onError);
- const ban=e.target.closest('[data-ban-user]');if(ban)return adminSetBan(ban.dataset.banUser,ban.dataset.banState==='true',ban.dataset.banEmail).catch(onError);const auth=e.target.closest('[data-oauth]');if(auth)return doOAuth(auth.dataset.oauth).catch(onError);const helper=e.target.closest('[data-auth-action]');if(helper)return handleAuthHelp(helper.dataset.authAction).catch(onError);const contact=e.target.closest('[data-contact]');if(contact)return contactOwner(contact.dataset.contact).catch(onError);const status=e.target.closest('[data-status]');if(status)return setStatus(status.dataset.id,status.dataset.status).catch(onError);const rep=e.target.closest('[data-report]');if(rep)return reportListing(rep.dataset.report).catch(onError);const thread=e.target.closest('[data-thread]');if(thread)return showThread(thread.dataset.thread).catch(onError);const detail=e.target.closest('[data-detail]');if(detail)return showItem(detail.dataset.detail);const manage=e.target.closest('[data-manage]');if(manage)return setStatus(manage.dataset.manage,manage.dataset.next).then(showMyListings).catch(onError);if(e.target.closest('[data-nav]'))return closeModal();const action=e.target.closest('[data-action]')?.dataset.action;if(action==='account')return currentUser()?showAccount().catch(onError):showAuth();if(action==='logout')return db.auth.signOut().then(()=>{closeModal();toast('Signed out')}).catch(onError);if(action==='newPost')return showPost();if(action==='myListings')return showMyListings().catch(onError);if(action==='adminPanel')return showAdminPanel().catch(onError);if(action==='inbox')return showInbox().catch(onError);if(action==='favorites')return showFavorites().catch(onError);if(action==='saveNewsletter')return setNewsletter(q('accountNewsletter').checked).catch(onError)});
-q('modalOverlay').addEventListener('submit',e=>{e.preventDefault();const f=e.target;const submit=e.submitter;if(f.id==='authForm')return authenticate(submit?.dataset.mode||'login').catch(onError);if(f.id==='passwordRecoveryForm'){const pass=f.elements.password.value;return db.auth.updateUser({password:pass}).then(({error})=>{if(error)throw error;closeModal();toast('Password updated. You can now sign in.');}).catch(err=>{q('recoveryFeedback').textContent=String(err.message||err)})}if(f.id==='postForm'){const btn=f.querySelector('button[type=submit]');btn.disabled=true;return saveListing(f).catch(onError).finally(()=>btn.disabled=false)}if(f.id==='sendMessage')return sendMessage(f).catch(onError);if(f.id==='reportForm')return postReport(f).catch(onError)});
+ const ban=e.target.closest('[data-ban-user]');if(ban)return adminSetBan(ban.dataset.banUser,ban.dataset.banState==='true',ban.dataset.banEmail).catch(onError);const auth=e.target.closest('[data-oauth]');if(auth)return doOAuth(auth.dataset.oauth).catch(onError);const helper=e.target.closest('[data-auth-action]');if(helper)return handleAuthHelp(helper.dataset.authAction).catch(onError);const contact=e.target.closest('[data-contact]');if(contact)return contactOwner(contact.dataset.contact).catch(onError);const status=e.target.closest('[data-status]');if(status)return setStatus(status.dataset.id,status.dataset.status).catch(onError);
+ const adminDelete=e.target.closest('[data-admin-delete]');if(adminDelete)return adminModerate(adminDelete.dataset.adminDelete,'delete').catch(onError);
+ const edit=e.target.closest('[data-edit-listing]');if(edit)return showEditListing(edit.dataset.editListing).catch(onError);const rep=e.target.closest('[data-report]');if(rep)return reportListing(rep.dataset.report).catch(onError);const thread=e.target.closest('[data-thread]');if(thread)return showThread(thread.dataset.thread).catch(onError);const detail=e.target.closest('[data-detail]');if(detail)return showItem(detail.dataset.detail);const manage=e.target.closest('[data-manage]');if(manage)return setStatus(manage.dataset.manage,manage.dataset.next).then(showMyListings).catch(onError);const navLink=e.target.closest('[data-nav-view]');if(navLink){listingView=navLink.dataset.navView;selectedCategory='all';drawCategories();drawListings();closeModal();q('browse').scrollIntoView({behavior:'smooth'});return;}if(e.target.closest('[data-nav]'))return closeModal();const action=e.target.closest('[data-action]')?.dataset.action;if(action==='account')return currentUser()?showAccount().catch(onError):showAuth();if(action==='logout')return db.auth.signOut().then(()=>{closeModal();toast('Signed out')}).catch(onError);if(action==='newPost')return showPost();if(action==='myListings')return showMyListings().catch(onError);if(action==='adminPanel')return showAdminPanel().catch(onError);if(action==='inbox')return showInbox().catch(onError);if(action==='favorites')return showFavorites().catch(onError);if(action==='saveNewsletter')return setNewsletter(q('accountNewsletter').checked).catch(onError)});
+q('modalOverlay').addEventListener('submit',e=>{e.preventDefault();const f=e.target;const submit=e.submitter;if(f.id==='authForm')return authenticate(submit?.dataset.mode||'login').catch(onError);if(f.id==='passwordRecoveryForm'){const pass=f.elements.password.value;return db.auth.updateUser({password:pass}).then(({error})=>{if(error)throw error;closeModal();toast('Password updated. You can now sign in.');}).catch(err=>{q('recoveryFeedback').textContent=String(err.message||err)})}if(f.id==='postForm'){const btn=f.querySelector('button[type=submit]');btn.disabled=true;return saveListing(f).catch(onError).finally(()=>btn.disabled=false)}
+ if(f.id==='editListingForm'){const btn=f.querySelector('button[type=submit]');btn.disabled=true;return saveEditedListing(f).catch(onError).finally(()=>btn.disabled=false)}if(f.id==='sendMessage')return sendMessage(f).catch(onError);if(f.id==='reportForm')return postReport(f).catch(onError)});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
 setInterval(()=>{if(adminAccess&&currentUser())checkAdminAlerts().catch(console.warn)},30000);
 db.auth.onAuthStateChange((event,s)=>{session=s;setTimeout(()=>updateHeader().catch(onError),0);if(event==='PASSWORD_RECOVERY')setTimeout(()=>showPasswordRecovery(),0)});
