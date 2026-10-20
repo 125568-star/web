@@ -146,6 +146,13 @@
   .listing-view-tabs button[aria-pressed="true"]{background:#1b674b;color:white;border-color:#1b674b}
   .wanted-chip{background:#fff0cf;color:#765123;border-radius:7px;padding:4px 7px;font-size:11px;font-weight:850}
   .admin-card-delete{color:#9c3434;background:#fff4f4;border:1px solid #e9c3c3;border-radius:8px;padding:7px 9px;cursor:pointer;font-size:11px;font-weight:850}
+  /* Restore readable foreground/background pairing after the later .btn override. */
+  .btn.btn-soft{background:#e8f4e9;color:#176a53}
+  .btn.btn-soft:hover{background:#d8eedd;color:#12543e}
+  /* Browse reset is intentionally a solid-green primary action, with white text. */
+  .more-wrap #resetButton{background:#0a7456;color:#ffffff}
+  .more-wrap #resetButton:hover{background:#08543f;color:#ffffff}
+  .more-wrap #resetButton:focus-visible{outline:3px solid #a2dec0;outline-offset:3px}
   @media(max-width:780px){.header-actions .btn-ghost{display:inline-flex}#adminBell{display:inline-flex!important}}
   #adminBell[hidden]{display:none!important}
   @media(max-width:630px){.header-row{flex-wrap:wrap;gap:5px;padding:7px 0}.header-actions{width:100%;display:flex;justify-content:space-between;gap:5px}
